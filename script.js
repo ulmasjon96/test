@@ -1,15 +1,13 @@
-/*************************************************************************
- * Quiz app
- * - Pool embedded below (from your uploaded docx / sample)
- * - Each question: options array + 'answer' index (which option is correct in original options)
- * - When starting a quiz we:
- *    * choose 20 random questions from pool
- *    * for each chosen question create shuffledOptions (each option carries isCorrect flag)
- *    * userAnswers store selected option index in shuffledOptions
- *************************************************************************/
+/* ==================== CONFIG ==================== */
+const POOL_KEY = 'js_quiz_used_questions_v1'; // localStorage key
+const PICK_COUNT = 30;
+const TIME_PER_QUESTION = 15; // seconds
 
-// ---------- QUESTION POOL (taken from your document).
-// Note: 'answer' field = index (0-based) of the correct option in the original options array.
+/* ==================== QUESTION POOL (use your provided pool) ====================
+   I use the textual question as the unique id; it's okay if identical questions appear —
+   but ideally each question text is unique in the pool.
+   (The pool below contains all your previously provided questions — truncated may break uniqueness)
+=================================================*/
 const questionPool = [
 	{
 		q: 'JavaScriptda o‘zgaruvchi e’lon qilish uchun qaysi kalit so‘z ishlatiladi?',
@@ -643,278 +641,313 @@ const questionPool = [
 		answer: 0,
 	},
 ];
-
-// ----- App state -----
-let pool = []; // current question pool (can be imported)
-let quiz = []; // selected 20 questions (with shuffled options)
+/* ================ App state ================= */
+let usedQuestions = JSON.parse(localStorage.getItem(POOL_KEY) || '[]'); // array of question q-text used in previous finished tests
+let currentSet = []; // selected 30 questions for the current test (objects from questionPool)
+let prepared = []; // each = { q, shuffledOptions:[{text,isCorrect}], userAnswerIndex: number|null, timedOut: bool }
 let currentIndex = 0;
-let userAnswers = {}; // index -> chosen option index (refers to shuffledOptions index)
-let showKey = false;
+let timerId = null;
+let timeLeft = TIME_PER_QUESTION;
 
-// UI elements
-const startBtn = document.getElementById('startBtn');
-const startFromImported = document.getElementById('startFromImported');
-const qCounter = document.getElementById('qCounter');
-const qText = document.getElementById('qText');
-const optionsList = document.getElementById('optionsList');
+/* ====== UI refs ====== */
+const questionText = document.getElementById('questionText');
+const qSub = document.getElementById('qSub');
+const optionsEl = document.getElementById('options');
 const prevBtn = document.getElementById('prevBtn');
 const nextBtn = document.getElementById('nextBtn');
-const finishBtn = document.getElementById('finishBtn');
-const quizArea = document.getElementById('quizArea');
-const progressText = document.getElementById('progressText');
-const status = document.getElementById('status');
-const importBox = document.getElementById('importBox');
-const importBtn = document.getElementById('importBtn');
-const importStatus = document.getElementById('importStatus');
-const clearImport = document.getElementById('clearImport');
-const showKeyToggle = document.getElementById('showKeyToggle');
-
-const resultPanel = document.getElementById('resultPanel');
-const correctCountEl = document.getElementById('correctCount');
-const wrongCountEl = document.getElementById('wrongCount');
-const percentEl = document.getElementById('percent');
-const gradeEl = document.getElementById('grade');
-const reviewBtn = document.getElementById('reviewBtn');
-const answersList = document.getElementById('answersList');
 const restartBtn = document.getElementById('restartBtn');
+const progressBar = document.getElementById('progressBar');
+const timerEl = document.getElementById('timer');
+const progressText = document.getElementById('progressText');
+const meta = document.getElementById('meta');
+const availableCountEl = document.getElementById('availableCount');
+const resultArea = document.getElementById('resultArea');
+const resultsBox = document.getElementById('resultsBox');
+const soundCorrect = document.getElementById('soundCorrect');
+const soundWrong = document.getElementById('soundWrong');
 
-// shuffle utility
-function shuffle(arr) {
+/* ===== Helpers ===== */
+function shuffleInPlace(arr) {
 	for (let i = arr.length - 1; i > 0; i--) {
 		const j = Math.floor(Math.random() * (i + 1));
 		[arr[i], arr[j]] = [arr[j], arr[i]];
 	}
 	return arr;
 }
-
-// prepare quiz: pick up to 20 questions, and for each question shuffle options and mark correct index
-function prepareQuizFromPool(srcPool) {
-	const copy = srcPool.slice();
-	shuffle(copy);
-	const chosen = copy.slice(0, Math.min(20, copy.length));
-	// For each chosen question create shuffledOptions: [{text, isCorrect}]
-	const prepared = chosen.map(item => {
-		const opts = item.options.map((text, idx) => ({ text: String(text), isCorrect: idx === item.answer }));
-		shuffle(opts);
-		const correctIndex = opts.findIndex(o => o.isCorrect);
-		return {
-			q: item.q,
-			shuffledOptions: opts, // array of {text,isCorrect}
-			correctIndex: correctIndex,
-		};
-	});
-	return prepared;
-}
-
-// render question at index
-function renderQuestion(idx) {
-	const item = quiz[idx];
-	qCounter.textContent = idx + 1 + ' / ' + quiz.length;
-	qText.textContent = item.q;
-	optionsList.innerHTML = '';
-	item.shuffledOptions.forEach((opt, i) => {
-		const div = document.createElement('div');
-		div.className = 'option';
-		div.tabIndex = 0;
-		div.dataset.idx = i;
-		div.innerHTML = `<span>${String.fromCharCode(65 + i)}. </span><span>${opt.text}</span>`;
-		// selected styling
-		if (userAnswers[idx] === i) div.classList.add('selected');
-		// if results shown & showKey true, mark correct/wrong
-		if (resultPanel.classList.contains('hidden') === false) {
-			if (opt.isCorrect) {
-				div.style.borderColor = 'rgba(30,154,74,0.2)';
-			}
-			if (userAnswers[idx] === i && !opt.isCorrect) {
-				div.style.background = '#fff0f0';
-			}
+function pickNewSet() {
+	// build available pool (exclude usedQuestions)
+	let available = questionPool.filter(q => !usedQuestions.includes(q.q));
+	// update available count
+	availableCountEl.textContent = available.length;
+	// if available less than PICK_COUNT, reset usedQuestions (start new cycle)
+	if (available.length < PICK_COUNT) {
+		// if none available, clear and refill
+		if (available.length === 0) {
+			usedQuestions = [];
+			localStorage.removeItem(POOL_KEY);
+			available = questionPool.slice();
+		} else {
+			// If some left but < PICK_COUNT, we can reset usedQuestions to allow fresh pick
+			// (choice: either take remaining + previously used to fill, or reset - we'll reset to ensure full randomness)
+			usedQuestions = [];
+			localStorage.removeItem(POOL_KEY);
+			available = questionPool.slice();
 		}
-		div.addEventListener('click', () => {
-			userAnswers[idx] = i;
-			[...optionsList.children].forEach(ch => ch.classList.remove('selected'));
-			div.classList.add('selected');
-			updateProgressText();
-		});
-		optionsList.appendChild(div);
-	});
-	// focus first option
-	const first = optionsList.querySelector('.option');
-	if (first) first.focus();
-	updateProgressText();
-	status.textContent = `Pool: ${pool.length || questionPool.length} — Active quiz: ${quiz.length}`;
-}
-
-function updateProgressText() {
-	const answered = Object.keys(userAnswers).length;
-	progressText.textContent = `${answered} javob / ${quiz.length}`;
-}
-
-function startWithPool(customPool) {
-	pool = customPool.slice();
-	if (pool.length < 1) {
-		alert('Savollar mavjud emas. Iltimos import qiling yoki sample dan boshlang.');
-		return;
+		availableCountEl.textContent = available.length;
 	}
-	quiz = prepareQuizFromPool(pool);
-	currentIndex = 0;
-	userAnswers = {};
-	quizArea.classList.remove('hidden');
-	resultPanel.classList.add('hidden');
-	renderQuestion(currentIndex);
+	// shuffle and pick first PICK_COUNT
+	const pick = shuffleInPlace(available.slice()).slice(0, Math.min(PICK_COUNT, available.length));
+	return pick;
+}
+function prepareQuestions(set) {
+	prepared = set.map(q => {
+		const opts = q.options.map((t, i) => ({ text: String(t), isCorrect: i === q.answer }));
+		shuffleInPlace(opts);
+		return { q: q.q, shuffledOptions: opts, userAnswerIndex: undefined, timedOut: false, original: q };
+	});
 }
 
-startBtn.addEventListener('click', () => {
-	// use embedded questionPool by default
-	startWithPool(questionPool);
-});
+/* ====== Lifecycle: start a fresh test set ====== */
+function startNewTest() {
+	// pick 30 new questions not in usedQuestions
+	currentSet = pickNewSet();
+	prepareQuestions(currentSet);
+	currentIndex = 0;
+	resultArea.style.display = 'none';
+	// UI meta
+	meta.textContent = `Yangi test — ${prepared.length} ta savol. (Har bir savol ${TIME_PER_QUESTION}s)`;
+	updateProgressUI();
+	renderCurrent();
+}
 
+/* ====== Rendering ====== */
+function renderCurrent() {
+	stopTimer();
+	if (!prepared || prepared.length === 0) return;
+	const item = prepared[currentIndex];
+	questionText.textContent = `${currentIndex + 1}. ${item.q}`;
+	qSub.textContent = '';
+	optionsEl.innerHTML = '';
+	item.shuffledOptions.forEach((opt, idx) => {
+		const btn = document.createElement('button');
+		btn.className = 'option';
+		btn.dataset.idx = idx;
+		btn.innerHTML = `<strong style="margin-right:8px">${String.fromCharCode(65 + idx)}.</strong> ${opt.text}`;
+		// if already answered or timed out, show correct/wrong
+		if (typeof item.userAnswerIndex !== 'undefined') {
+			btn.disabled = true;
+			if (opt.isCorrect) btn.classList.add('correct');
+			if (item.userAnswerIndex === idx && !opt.isCorrect) btn.classList.add('wrong');
+		} else {
+			btn.addEventListener('click', () => selectAnswer(idx, btn));
+		}
+		optionsEl.appendChild(btn);
+	});
+	prevBtn.disabled = currentIndex === 0;
+	nextBtn.disabled = !(typeof item.userAnswerIndex !== 'undefined' || item.timedOut);
+	updateProgressUI();
+	// start timer if not answered yet
+	if (typeof item.userAnswerIndex === 'undefined' && !item.timedOut) {
+		startTimer();
+	} else {
+		timerEl.textContent = item.timedOut ? `--` : `--`;
+	}
+	// focus first active button
+	const first = optionsEl.querySelector('.option:not([disabled])');
+	if (first) first.focus();
+}
+
+/* ====== Answer handling ====== */
+function selectAnswer(idx, btn) {
+	stopTimer();
+	const item = prepared[currentIndex];
+	if (typeof item.userAnswerIndex !== 'undefined') return;
+	item.userAnswerIndex = idx;
+	// disable all and reveal
+	const allBtns = optionsEl.querySelectorAll('.option');
+	allBtns.forEach(b => {
+		b.disabled = true;
+		const i = Number(b.dataset.idx);
+		if (item.shuffledOptions[i].isCorrect) b.classList.add('correct');
+		if (i === idx && !item.shuffledOptions[i].isCorrect) b.classList.add('wrong');
+	});
+	// sound
+	if (item.shuffledOptions[idx].isCorrect) {
+		soundCorrect.currentTime = 0;
+		soundCorrect.play().catch(() => {});
+	} else {
+		soundWrong.currentTime = 0;
+		soundWrong.play().catch(() => {});
+	}
+	nextBtn.disabled = false;
+	updateProgressUI();
+}
+
+/* ====== Timer ====== */
+function startTimer() {
+	stopTimer();
+	timeLeft = TIME_PER_QUESTION;
+	timerEl.textContent = `${timeLeft}s`;
+	timerId = setInterval(() => {
+		timeLeft--;
+		timerEl.textContent = `${timeLeft}s`;
+		if (timeLeft <= 0) {
+			clearInterval(timerId);
+			timerId = null;
+			handleTimeout();
+		}
+	}, 1000);
+}
+function stopTimer() {
+	if (timerId) {
+		clearInterval(timerId);
+		timerId = null;
+	}
+}
+
+function handleTimeout() {
+	const item = prepared[currentIndex];
+	item.timedOut = true;
+	// mark as answered with undefined selection but reveal correct
+	const allBtns = optionsEl.querySelectorAll('.option');
+	allBtns.forEach(b => {
+		b.disabled = true;
+		const i = Number(b.dataset.idx);
+		if (item.shuffledOptions[i].isCorrect) b.classList.add('correct');
+	});
+	// play wrong sound
+	soundWrong.currentTime = 0;
+	soundWrong.play().catch(() => {});
+	nextBtn.disabled = false;
+	updateProgressUI();
+}
+
+/* ====== Navigation ====== */
 prevBtn.addEventListener('click', () => {
+	stopTimer();
 	if (currentIndex > 0) {
 		currentIndex--;
-		renderQuestion(currentIndex);
+		renderCurrent();
 	}
 });
 nextBtn.addEventListener('click', () => {
-	if (currentIndex < quiz.length - 1) {
+	stopTimer();
+	if (currentIndex < prepared.length - 1) {
 		currentIndex++;
-		renderQuestion(currentIndex);
+		renderCurrent();
+	} else {
+		// finish test
+		finishTest();
 	}
 });
-
-finishBtn.addEventListener('click', () => {
-	// compute score by checking userAnswers against shuffledOptions isCorrect
-	let correct = 0;
-	for (let i = 0; i < quiz.length; i++) {
-		const ans = userAnswers[i];
-		if (typeof ans === 'number' && quiz[i].shuffledOptions[ans] && quiz[i].shuffledOptions[ans].isCorrect) correct++;
-	}
-	const wrong = quiz.length - correct;
-	const perc = Math.round((correct / quiz.length) * 100);
-	const grade = Math.round((correct / quiz.length) * 10 * 10) / 10;
-	correctCountEl.textContent = correct;
-	wrongCountEl.textContent = wrong;
-	percentEl.textContent = perc + '%';
-	gradeEl.textContent = grade + ' / 10';
-	// show result panel
-	resultPanel.classList.remove('hidden');
-	answersList.classList.add('hidden');
-	showKey = showKeyToggle.dataset.on === 'true';
-	quizArea.classList.add('hidden');
-});
-
-reviewBtn.addEventListener('click', () => {
-	answersList.innerHTML = '';
-	answersList.classList.remove('hidden');
-	answersList.style.display = 'block';
-	quiz.forEach((item, idx) => {
-		const div = document.createElement('div');
-		div.style.padding = '8px';
-		div.style.borderBottom = '1px solid #eef2ff';
-		const userAns = userAnswers[idx];
-		const correctObj = item.shuffledOptions.find(o => o.isCorrect);
-		const correctIndex = item.shuffledOptions.findIndex(o => o.isCorrect);
-		const ok = typeof userAns === 'number' && userAns === correctIndex;
-		div.innerHTML = `
-          <div style="font-weight:600">${idx + 1}. ${item.q}</div>
-          <div class="small" style="margin-top:6px">
-            Your answer: ${
-							typeof userAns === 'number'
-								? String.fromCharCode(65 + userAns) + '. ' + item.shuffledOptions[userAns].text
-								: '<em>Belgilanmadi</em>'
-						}
-            <br>
-            Correct: <strong>${String.fromCharCode(65 + correctIndex)}. ${correctObj.text}</strong>
-            <span style="margin-left:10px" class="${ok ? 'result-correct' : 'result-wrong'}">${
-			ok ? '✔ To‘g‘ri' : '✖ Noto‘g‘ri'
-		}</span>
-          </div>
-        `;
-		answersList.appendChild(div);
-	});
-	answersList.scrollIntoView({ behavior: 'smooth' });
-});
-
 restartBtn.addEventListener('click', () => {
-	resultPanel.classList.add('hidden');
-	quizArea.classList.remove('hidden');
-	// restart new random selection from pool
-	startWithPool(pool.length ? pool : questionPool);
+	// When user clicks restart, we will mark current 30 as used only when finishTest() is called.
+	// But restart here is "start new selection immediately" — we'll treat it as abandoning current attempt
+	// and start a fresh set that excludes already finished sets (usedQuestions).
+	if (confirm('Testni qayta boshlash — yangi 30 ta savol tanlanadi (hozirgi savollar saqlanmaydi). Davom etilsinmi?')) {
+		startNewTest();
+	}
 });
 
-// ----------------- Import logic (same naive parser) -----------------
-function parseTextToQuestions(text) {
-	const lines = text
-		.split(/\r?\n/)
-		.map(l => l.trim())
-		.filter(l => l.length > 0);
-	const results = [];
-	let i = 0;
-	while (i < lines.length) {
-		const qline = lines[i];
-		const options = [];
-		let j = i + 1;
-		while (j < lines.length && options.length < 6) {
-			// stop if next looks like a question (ends with ? and we already have options)
-			if (lines[j].includes('?') && options.length >= 1) break;
-			const cleaned = lines[j].replace(/^[A-D]\s*[\)\.\-:\s]*/i, '').trim();
-			if (cleaned.length > 0) options.push(cleaned);
-			j++;
-			if (j < lines.length && lines[j].length > 30 && lines[j].endsWith('?') && options.length >= 2) break;
-		}
-		if (options.length >= 2) {
-			const finalOpts = options.slice(0, 4);
-			// default answer = 0 (unknown) — user can import with correct answers if available in specific format
-			results.push({ q: qline, options: finalOpts, answer: 0 });
-			i = j;
-		} else {
-			i++;
-		}
-	}
-	return results;
+/* ====== Finish logic: mark currentSet as used so they won't repeat ====== */
+function finishTest() {
+	stopTimer();
+	// compute score
+	const total = prepared.length;
+	const correct = prepared.reduce((acc, p) => {
+		if (typeof p.userAnswerIndex === 'number' && p.shuffledOptions[p.userAnswerIndex].isCorrect) return acc + 1;
+		return acc;
+	}, 0);
+	const percent = Math.round((correct / total) * 100);
+	let grade = '';
+	if (percent >= 80) grade = 'A’lo 🎉';
+	else if (percent >= 60) grade = 'Yaxshi 👍';
+	else if (percent >= 40) grade = 'Qoniqarli 🙂';
+	else grade = 'Yomon 😞';
+
+	// mark currentSet questions as used (by question text)
+	const newlyUsed = prepared.map(p => p.q);
+	usedQuestions = Array.from(new Set([...usedQuestions, ...newlyUsed]));
+	localStorage.setItem(POOL_KEY, JSON.stringify(usedQuestions));
+	availableCountEl.textContent = Math.max(0, questionPool.length - usedQuestions.length);
+
+	// build review HTML
+	let reviewHtml = '<div class="review">';
+	prepared.forEach((p, i) => {
+		const ua = p.userAnswerIndex;
+		const ci = p.shuffledOptions.findIndex(o => o.isCorrect);
+		const ok = typeof ua === 'number' && p.shuffledOptions[ua].isCorrect;
+		reviewHtml += `<div style="padding:10px 0;border-bottom:1px solid rgba(255,255,255,0.03)">
+      <div style="font-weight:600">${i + 1}. ${escapeHtml(p.q)}</div>
+      <div style="margin-top:6px;font-size:14px;color:var(--muted)">
+        Javob: ${
+					typeof ua === 'number'
+						? `<strong>${String.fromCharCode(65 + ua)}. ${escapeHtml(p.shuffledOptions[ua].text)}</strong>`
+						: '<em>Belgilanmadi</em>'
+				}
+        &nbsp; — To‘g‘ri: <strong>${String.fromCharCode(65 + ci)}. ${escapeHtml(p.shuffledOptions[ci].text)}</strong>
+        <span style="margin-left:10px">${
+					ok ? '<span style="color:var(--good)">✔ To‘g‘ri</span>' : '<span style="color:var(--bad)">✖ Noto‘g‘ri</span>'
+				}</span>
+      </div>
+    </div>`;
+	});
+	reviewHtml += '</div>';
+
+	// show results
+	resultsBox.innerHTML = `
+    <div class="big">${correct} / ${total}</div>
+    <div class="small">Foiz: <strong>${percent}%</strong></div>
+    <div class="small">Baholash: <strong>${grade}</strong></div>
+    <div style="margin-top:10px"><button class="btn-primary" id="btnNew">Yangi 30 ta savol (davom etish)</button>
+      <button class="btn-ghost" id="btnReview" style="margin-left:8px">Testni ko‘rib chiqish</button>
+    </div>
+    ${reviewHtml}
+  `;
+	resultArea.style.display = 'block';
+	// attach handlers
+	document.getElementById('btnNew').addEventListener('click', () => {
+		startNewTest();
+		window.scrollTo({ top: 0, behavior: 'smooth' });
+	});
+	document.getElementById('btnReview').addEventListener('click', () => {
+		// scroll to review (already visible)
+		resultsBox.scrollIntoView({ behavior: 'smooth' });
+	});
+	// hide quiz area (we keep it visible; but user sees resultArea)
 }
 
-importBtn.addEventListener('click', () => {
-	const text = importBox.value.trim();
-	if (!text) {
-		alert('Iltimos savollar matnini paste qiling.');
-		return;
-	}
-	const parsed = parseTextToQuestions(text);
-	if (parsed.length === 0) {
-		alert('Parser savollarni aniqlay olmadi. Iltimos formatni tekshiring (savol + 2-4 variant).');
-		return;
-	}
-	pool = parsed;
-	importStatus.textContent = `Imported: ${parsed.length} savol`;
-	alert('Import muvaffaqiyatli. Endi "Start from imported" tugmasini bosing.');
-});
+/* ====== Utilities ====== */
+function updateProgressUI() {
+	const pct = (currentIndex / Math.max(1, prepared.length)) * 100;
+	progressBar.style.width = pct + '%';
+	progressText.textContent = `${
+		prepared.filter(p => typeof p.userAnswerIndex !== 'undefined' || p.timedOut).length
+	} / ${prepared.length} javob`;
+	// meta and available
+	meta.textContent = `Savol ${currentIndex + 1} / ${prepared.length} • Belgilangan: ${
+		prepared.filter(p => typeof p.userAnswerIndex !== 'undefined').length
+	}`;
+	availableCountEl.textContent = Math.max(0, questionPool.length - usedQuestions.length);
+}
+function escapeHtml(s) {
+	if (!s) return '';
+	return String(s).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;');
+}
 
-clearImport.addEventListener('click', () => {
-	importBox.value = '';
-	importStatus.textContent = 'Imported: 0';
-});
-
-startFromImported.addEventListener('click', () => {
-	if (!pool || pool.length === 0) {
-		alert('Avval import qiling yoki matnni joylashtiring.');
-		return;
-	}
-	startWithPool(pool);
-});
-
-showKeyToggle.addEventListener('click', () => {
-	const now = showKeyToggle.dataset.on === 'true';
-	showKeyToggle.dataset.on = (!now).toString();
-	showKeyToggle.textContent = `Ko'rsatkichlar: ${!now ? 'ON' : 'OFF'}`;
-});
-
+/* ===== Keyboard support ===== */
 document.addEventListener('keydown', e => {
-	if (quizArea.classList.contains('hidden')) return;
-	if (e.key === 'ArrowRight') nextBtn.click();
-	if (e.key === 'ArrowLeft') prevBtn.click();
+	if (resultArea.style.display !== 'none') return; // ignore during review
+	if (e.key >= '1' && e.key <= '9') {
+		const idx = Number(e.key) - 1;
+		const btn = optionsEl.querySelector(`.option[data-idx="${idx}"]`);
+		if (btn && !btn.disabled) btn.click();
+	} else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+		if (!nextBtn.disabled) nextBtn.click();
+	} else if (e.key === 'ArrowLeft') {
+		if (!prevBtn.disabled) prevBtn.click();
+	}
 });
 
-// initial status
-status.textContent = `Pool: sample (${questionPool.length}) — Active quiz: —`;
-importStatus.textContent = 'Imported: 0';
-showKeyToggle.dataset.on = 'false';
+/* ====== Init ====== */
+startNewTest();
