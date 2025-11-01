@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="uz">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="viewport" content="width=device-width,initial-scale=1" />
+		<title>JS Test — Tasodifiy 20 savol (variantlar ham aralashtirilgan)</title>
+		<link rel="stylesheet" href="style.css">
+	</head>
+	<body>
+		<div class="container" role="main">
+			<header>
+				<div>
+					<h1>JavaScript — Stipendiya test (tasodifiy 20; variantlar ham aralashtirilgan)</h1>
+					<p class="small">
+						Har bir savolda 4 variant tasodifiy joylashtiriladi. (Fayl: stipendiya test 1,2-ATT-24 guruhlari uchun.docx)
+					</p>
+				</div>
+			</header>
+
+			<div class="panel topbar">
+				<div class="controls">
+					<button id="startBtn">Start Test (20 tasodifiy savol)</button>
+					<button id="startFromImported" class="btn secondary">Start from imported</button>
+					<button id="showKeyToggle" class="btn secondary">Ko'rsatkichlar: OFF</button>
+				</div>
+
+				<div style="margin-left: auto; display: flex; gap: 8px; align-items: center">
+					<div class="small question-count" id="status">Savollar: —</div>
+				</div>
+			</div>
+
+			<div class="panel">
+				<strong class="small">Import your questions (optional)</strong>
+				<p class="small">
+					Word fayldagi matnni paste qilib, <strong>Import from text</strong> tugmasi bilan savollar bazasiga
+					qo‘shishingiz mumkin.
+				</p>
+				<textarea
+					id="importBox"
+					placeholder="Savol1
+A) variant1
+B) variant2
+C) variant3
+D) variant4
+
+Savol2
+..."></textarea>
+
+				<div style="margin-top: 8px; display: flex; gap: 8px; align-items: center">
+					<button id="importBtn" class="btn secondary">Import from text</button>
+					<button id="clearImport" class="btn secondary">Clear</button>
+					<div class="small" id="importStatus">Imported: 0</div>
+				</div>
+			</div>
+
+			<div id="quizArea" class="panel hidden" aria-live="polite">
+				<div class="qa">
+					<div style="flex: 1">
+						<div class="question-count small" id="qCounter">1 / 20</div>
+						<div class="question" id="qText">Savol yuklanmoqda...</div>
+						<div class="options" id="optionsList"></div>
+					</div>
+				</div>
+
+				<footer>
+					<div style="display: flex; gap: 8px">
+						<button id="prevBtn" class="btn secondary">Prev</button>
+						<button id="nextBtn" class="btn">Next</button>
+						<button id="finishBtn" class="btn" style="background: #0b814b">Testni yakunlash</button>
+					</div>
+
+					<div style="text-align: right">
+						<div class="small" id="progressText">0 javob / 20</div>
+					</div>
+				</footer>
+			</div>
+
+			<div id="resultPanel" class="panel hidden">
+				<h3>Natija</h3>
+				<div id="scoreSummary" class="summary visible">
+					<div><strong>To‘g‘ri:</strong> <span id="correctCount">0</span></div>
+					<div><strong>Noto‘g‘ri:</strong> <span id="wrongCount">0</span></div>
+					<div><strong>Foiz:</strong> <span id="percent">0%</span></div>
+					<div><strong>Baho (10 ball tizimida):</strong> <span id="grade">0</span></div>
+				</div>
+
+				<div style="margin-top: 12px">
+					<button id="reviewBtn" class="btn secondary">Javoblarni ko‘rsatish</button>
+					<button id="restartBtn" class="btn">Yana boshlash</button>
+				</div>
+
+				<div id="answersList" class="panel hidden" style="margin-top: 12px"></div>
+			</div>
+
+			<footer style="margin-top: 12px">
+				<div class="small">
+					Eslatma: agar import bilan muammo bo‘lsa, Word fayl matnini paste qilib ko‘ring. Agar xohlasangiz men siz
+					uchun butun fayldan to‘liq JSON tayyorlab bera olaman.
+				</div>
+			</footer>
+		</div>
+
+		<script src="script.js"></script>
+	</body>
+</html>
