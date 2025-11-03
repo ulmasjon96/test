@@ -663,8 +663,6 @@ const meta = document.getElementById('meta');
 const availableCountEl = document.getElementById('availableCount');
 const resultArea = document.getElementById('resultArea');
 const resultsBox = document.getElementById('resultsBox');
-const soundCorrect = document.getElementById('soundCorrect');
-const soundWrong = document.getElementById('soundWrong');
 
 /* ===== Helpers ===== */
 function shuffleInPlace(arr) {
@@ -771,14 +769,6 @@ function selectAnswer(idx, btn) {
 		if (item.shuffledOptions[i].isCorrect) b.classList.add('correct');
 		if (i === idx && !item.shuffledOptions[i].isCorrect) b.classList.add('wrong');
 	});
-	// sound
-	if (item.shuffledOptions[idx].isCorrect) {
-		soundCorrect.currentTime = 0;
-		soundCorrect.play().catch(() => {});
-	} else {
-		soundWrong.currentTime = 0;
-		soundWrong.play().catch(() => {});
-	}
 	nextBtn.disabled = false;
 	updateProgressUI();
 }
@@ -815,9 +805,6 @@ function handleTimeout() {
 		const i = Number(b.dataset.idx);
 		if (item.shuffledOptions[i].isCorrect) b.classList.add('correct');
 	});
-	// play wrong sound
-	soundWrong.currentTime = 0;
-	soundWrong.play().catch(() => {});
 	nextBtn.disabled = false;
 	updateProgressUI();
 }
